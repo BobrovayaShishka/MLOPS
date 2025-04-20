@@ -1,29 +1,46 @@
 pipeline {
     agent any
+
     stages {
         stage('Download Data') {
             steps {
-                sh 'python scripts/download_data.py'
+                sh """
+                python3 -m venv ./my_env
+                source ./my_env/bin/activate
+                pip install -r requirements.txt
+                python3 download.py
+                """
             }
         }
-        stage('Preprocess Data') {
-            steps {
-                sh 'python scripts/preprocess_data.py'
-            }
-        }
+
         stage('Train Model') {
             steps {
-                sh 'python scripts/train_model.py'
+                sh """
+                source ./my_env/bin/activate
+                python3 train_model.py > best_model.txt
+                """
             }
         }
+
         stage('Deploy Model') {
             steps {
-                sh 'python scripts/deploy_model.py &'
+                sh """
+                source ./my_env/bin/activate
+                export BUILD_ID=dontKillMe
+                export JENKINS_NODE_COOKIE=dontKillMe
+                path_model=$(cat best_model.txt | grep -oP 'runs:/\K.*')
+                mlflow models serve -m "runs:/$path_model" -p 5003 --no-conda &
+                """
             }
         }
-        stage('Test Model') {
+
+        stage('Health Check') {
             steps {
-                sh 'curl -X POST http://localhost:5000/predict -H "Content-Type: application/json" -d \'{"MedInc": 8.3252, "HouseAge": 41, "AveRooms": 6.984, "AveBedrms": 1.0238, "Population": 322, "AveOccup": 2.555, "Latitude": 37.88, "Longitude": -122.23}\''
+                sh """
+                curl -X POST http://localhost:5003/invocations \
+                -H 'Content-Type: application/json' \
+                --data '{"inputs": [[1, 2, 3, 4, 5, 6, 7, 8]]}'
+                """
             }
         }
     }
